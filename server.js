@@ -84,6 +84,62 @@ app.get("/", (req, res) => {
   res.send("GitHub webhook server running");
 });
 
+app.get("/leaderboard", async (req, res) => {
+  try {
+    const data = await Activity.aggregate([
+      {
+        $group: {
+          _id: "$author",
+          commits: {
+            $sum: {
+              $cond: [{ $eq: ["$source", "commit"] }, 1, 0]
+            }
+          },
+          prs: {
+            $sum: {
+              $cond: [{ $eq: ["$source", "pr"] }, 1, 0]
+            }
+          },
+          points: { $sum: "$points" },
+          reposWorked: { $addToSet: "$repo" }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          username: "$_id",
+          commits: 1,
+          prs: 1,
+          points: 1,
+          reposWorked: 1,
+          repoCount: { $size: "$reposWorked" }
+        }
+      },
+      {
+        $sort: {
+          points: -1,
+          commits: -1,
+          prs: -1,
+          username: 1
+        }
+      }
+    ]);
+
+    res.status(200).json({
+      success: true,
+      count: data.length,
+      leaderboard: data
+    });
+  } catch (err) {
+    console.error("❌ Leaderboard error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch leaderboard",
+      error: err.message
+    });
+  }
+});
+
 app.post("/webhook/github", async (req, res) => {
   try {
     const eventType = req.headers["x-github-event"];

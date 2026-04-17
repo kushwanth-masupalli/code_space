@@ -14,7 +14,7 @@ const activitySchema = new mongoose.Schema(
     timestamp: { type: Date, required: true },
 
     commitId: { type: String, default: null },
-    prNumber: { type: Number, default: null },
+    prNumber: { type: Number, unique: true, sparse: true },
     action: { type: String, default: null },
 
     type: { type: String, default: null },

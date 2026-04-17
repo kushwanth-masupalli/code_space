@@ -2,9 +2,9 @@ require("dotenv").config();
 
 const express = require("express");
 const mongoose = require("mongoose");
+const cors = require("cors");
 const Activity = require("./models/Activity");
 
-const cors = require("cors");
 const app = express();
 const PORT = process.env.PORT || 10000;
 
@@ -208,38 +208,46 @@ app.post("/webhook/github", async (req, res) => {
         });
       }
 
-      let type = extractType(pr.title);
-      type = normalizePRType(type);
+      // Only award points when PR is actually merged
+      if (payload.action === "closed" && pr.merged === true) {
+        let type = extractType(pr.title);
+        type = normalizePRType(type);
 
-      const difficulty = extractDifficulty(pr.title);
-      const points = calculatePRPoints(type, difficulty);
+        const difficulty = extractDifficulty(pr.title);
+        const points = calculatePRPoints(type, difficulty);
 
-      const doc = {
-        deliveryId,
-        eventType: "pull_request",
-        source: "pr",
+        const doc = {
+          deliveryId,
+          eventType: "pull_request",
+          source: "pr",
 
-        repo: payload.repository?.name || "unknown",
-        author: pr.user?.login || payload.sender?.login || "unknown",
+          repo: payload.repository?.name || "unknown",
+          author: pr.user?.login || payload.sender?.login || "unknown",
 
-        message: pr.title || "No title",
-        url: pr.html_url || null,
-        timestamp: pr.created_at ? new Date(pr.created_at) : new Date(),
+          message: pr.title || "No title",
+          url: pr.html_url || null,
+          timestamp: pr.merged_at ? new Date(pr.merged_at) : new Date(),
 
-        commitId: null,
-        prNumber: pr.number || null,
-        action: payload.action || null,
+          commitId: null,
+          prNumber: pr.number || null,
+          action: "merged",
 
-        type,
-        difficulty,
-        points
-      };
+          type,
+          difficulty,
+          points
+        };
 
-      await Activity.create(doc);
+        await Activity.create(doc);
+
+        return res.status(200).json({
+          success: true,
+          message: "Merged PR saved with points"
+        });
+      }
 
       return res.status(200).json({
         success: true,
-        message: "Pull request saved"
+        message: `PR ignored: ${payload.action}`
       });
     }
 

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>DevPulse Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+    }
+
+    header {
+      padding: 20px;
+      text-align: center;
+      background: #020617;
+      font-size: 24px;
+      font-weight: bold;
+      color: #38bdf8;
+    }
+
+    .container {
+      padding: 20px;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .card {
+      background: #020617;
+      padding: 15px;
+      border-radius: 10px;
+      box-shadow: 0 0 10px rgba(56,189,248,0.2);
+      overflow-x: auto;
+    }
+
+    h2 {
+      margin-top: 0;
+      color: #38bdf8;
+    }
+
+    .status {
+      margin-bottom: 15px;
+      color: #94a3b8;
+      font-size: 14px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 900px;
+    }
+
+    th, td {
+      padding: 10px;
+      text-align: left;
+    }
+
+    th {
+      border-bottom: 1px solid #334155;
+      color: #38bdf8;
+    }
+
+    tr:hover {
+      background: #1e293b;
+    }
+
+    .rank {
+      font-weight: bold;
+      color: #facc15;
+    }
+
+    .points {
+      font-weight: bold;
+      color: #22c55e;
+    }
+
+    .repos {
+      font-size: 13px;
+      color: #cbd5e1;
+      line-height: 1.4;
+    }
+
+    .error {
+      color: #f87171;
+      margin-top: 12px;
+    }
+  </style>
+</head>
+
+<body>
+
+<header>🚀 DevPulse Dashboard</header>
+
+<div class="container">
+  <div class="card">
+    <h2>🏆 Leaderboard</h2>
+    <div class="status" id="status">Loading leaderboard...</div>
+    <table id="leaderboard"></table>
+    <div class="error" id="error"></div>
+  </div>
+</div>
+
+<script>
+const API = "https://code-space-ezfo.onrender.com/leaderboard";
+
+async function loadLeaderboard() {
+  const status = document.getElementById("status");
+  const errorBox = document.getElementById("error");
+  const table = document.getElementById("leaderboard");
+
+  try {
+    errorBox.textContent = "";
+    status.textContent = "Loading leaderboard...";
+
+    const res = await fetch(API);
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+
+    const result = await res.json();
+    const data = result.leaderboard;
+
+    status.textContent = `Total developers: ${result.count}`;
+
+    table.innerHTML = `
+      <tr>
+        <th>Rank</th>
+        <th>Username</th>
+        <th>Commits</th>
+        <th>PRs</th>
+        <th>Points</th>
+        <th>Repo Count</th>
+        <th>Repositories</th>
+      </tr>
+      ${
+        data.length === 0
+          ? `<tr><td colspan="7">No data found</td></tr>`
+          : data.map((u, index) => `
+            <tr>
+              <td class="rank">#${index + 1}</td>
+              <td>${u.username}</td>
+              <td>${u.commits}</td>
+              <td>${u.prs}</td>
+              <td class="points">${u.points}</td>
+              <td>${u.repoCount}</td>
+              <td class="repos">${u.reposWorked.join(", ")}</td>
+            </tr>
+          `).join("")
+      }
+    `;
+  } catch (err) {
+    status.textContent = "Failed to load leaderboard";
+    errorBox.textContent = err.message;
+  }
+}
+
+loadLeaderboard();
+setInterval(loadLeaderboard, 5000);
+</script>
+
+</body>
+</html>

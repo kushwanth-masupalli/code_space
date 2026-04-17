@@ -15,7 +15,11 @@ const activitySchema = new mongoose.Schema(
 
     commitId: { type: String, default: null },
     prNumber: { type: Number, default: null },
-    action: { type: String, default: null }
+    action: { type: String, default: null },
+
+    type: { type: String, default: null },
+    difficulty: { type: String, default: null },
+    points: { type: Number, default: 0 }
   },
   { timestamps: true }
 );

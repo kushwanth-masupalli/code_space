@@ -2,17 +2,17 @@ require("dotenv").config();
 
 const express = require("express");
 const mongoose = require("mongoose");
-const WebhookEvent = require("./WebhookEvent");
+const Activity = require("./models/Activity");
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 
 app.use(express.json());
 
 async function connectDB() {
   try {
     if (!process.env.MONGO_URI) {
-      throw new Error("MONGO_URI is not defined in .env");
+      throw new Error("MONGO_URI is not defined");
     }
 
     await mongoose.connect(process.env.MONGO_URI);
@@ -24,41 +24,100 @@ async function connectDB() {
 }
 
 app.get("/", (req, res) => {
-  res.send("Webhook server is running");
+  res.send("GitHub webhook server running");
 });
 
 app.post("/webhook/github", async (req, res) => {
   try {
+    const eventType = req.headers["x-github-event"];
+    const deliveryId = req.headers["x-github-delivery"] || null;
     const payload = req.body;
 
-    const doc = await WebhookEvent.create({
-      eventType: req.headers["x-github-event"] || "unknown",
-      deliveryId: req.headers["x-github-delivery"] || null,
-      repository: {
-        id: payload.repository?.id ?? null,
-        name: payload.repository?.name ?? null,
-        fullName: payload.repository?.full_name ?? null,
-        private: payload.repository?.private ?? null
-      },
-      sender: {
-        login: payload.sender?.login ?? null,
-        id: payload.sender?.id ?? null
-      },
-      payload
-    });
+    if (eventType === "push") {
+      const repo = payload.repository?.name || "unknown";
+      const commits = payload.commits || [];
 
-    console.log("✅ Webhook saved:", doc._id);
+      if (commits.length === 0) {
+        return res.status(200).json({
+          success: true,
+          message: "No commits in push payload"
+        });
+      }
+
+      const docs = commits.map((commit) => ({
+        deliveryId,
+        eventType: "push",
+        source: "commit",
+
+        repo,
+        author:
+          commit.author?.username ||
+          commit.author?.name ||
+          payload.sender?.login ||
+          "unknown",
+
+        message: commit.message || "No message",
+        url: commit.url || null,
+        timestamp: commit.timestamp ? new Date(commit.timestamp) : new Date(),
+
+        commitId: commit.id || null,
+        prNumber: null,
+        action: null
+      }));
+
+      await Activity.insertMany(docs);
+
+      return res.status(200).json({
+        success: true,
+        message: "Push commits saved",
+        count: docs.length
+      });
+    }
+
+    if (eventType === "pull_request") {
+      const pr = payload.pull_request;
+
+      if (!pr) {
+        return res.status(400).json({
+          success: false,
+          message: "No pull_request object found"
+        });
+      }
+
+      const doc = {
+        deliveryId,
+        eventType: "pull_request",
+        source: "pr",
+
+        repo: payload.repository?.name || "unknown",
+        author: pr.user?.login || payload.sender?.login || "unknown",
+
+        message: pr.title || "No title",
+        url: pr.html_url || null,
+        timestamp: pr.created_at ? new Date(pr.created_at) : new Date(),
+
+        commitId: null,
+        prNumber: pr.number || null,
+        action: payload.action || null
+      };
+
+      await Activity.create(doc);
+
+      return res.status(200).json({
+        success: true,
+        message: "Pull request saved"
+      });
+    }
 
     return res.status(200).json({
       success: true,
-      message: "Webhook saved to MongoDB",
-      id: doc._id
+      message: `Ignored event: ${eventType}`
     });
   } catch (err) {
-    console.error("❌ Error saving webhook:", err);
+    console.error("❌ Webhook error:", err);
     return res.status(500).json({
       success: false,
-      message: "Failed to save webhook",
+      message: "Failed to save webhook data",
       error: err.message
     });
   }

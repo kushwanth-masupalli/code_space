@@ -86,7 +86,7 @@ function calculatePRPoints(type, difficulty) {
 
 function isExcludedUser(username) {
   if (!username) return false;
-  return EXCLUDED_USERS.includes(username.toLowerCase());
+  return EXCLUDED_USERS.includes(String(username).toLowerCase());
 }
 
 async function githubRequest(url) {
@@ -112,7 +112,7 @@ async function githubRequest(url) {
   return response.json();
 }
 
-async function fetchRepoOpenIssues(repoName) {
+async function fetchRepoOpenIssuesSummary(repoName) {
   const org = process.env.GITHUB_ORG;
 
   if (!org) {
@@ -132,6 +132,31 @@ async function fetchRepoOpenIssues(repoName) {
   };
 }
 
+async function fetchRepoIssueDetails(repoName) {
+  const org = process.env.GITHUB_ORG;
+
+  if (!org) {
+    throw new Error("GITHUB_ORG is not defined");
+  }
+
+  const issues = await githubRequest(
+    `https://api.github.com/repos/${org}/${repoName}/issues?state=open&per_page=100`
+  );
+
+  const pureIssues = issues.filter((item) => !item.pull_request);
+
+  return pureIssues.map((issue) => ({
+    id: issue.id,
+    number: issue.number,
+    title: issue.title,
+    state: issue.state,
+    createdAt: issue.created_at,
+    updatedAt: issue.updated_at,
+    url: issue.html_url,
+    user: issue.user?.login || "unknown"
+  }));
+}
+
 app.get("/", (req, res) => {
   res.send("GitHub webhook server running");
 });
@@ -147,36 +172,19 @@ app.get("/leaderboard", async (req, res) => {
       {
         $group: {
           _id: "$author",
-          commits: {
-            $sum: {
-              $cond: [{ $eq: ["$source", "commit"] }, 1, 0]
-            }
-          },
-          prs: {
-            $sum: {
-              $cond: [{ $eq: ["$source", "pr"] }, 1, 0]
-            }
-          },
-          points: { $sum: "$points" },
-          reposWorked: { $addToSet: "$repo" }
+          points: { $sum: "$points" }
         }
       },
       {
         $project: {
           _id: 0,
           username: "$_id",
-          commits: 1,
-          prs: 1,
-          points: 1,
-          reposWorked: 1,
-          repoCount: { $size: "$reposWorked" }
+          points: 1
         }
       },
       {
         $sort: {
           points: -1,
-          commits: -1,
-          prs: -1,
           username: 1
         }
       }
@@ -192,6 +200,56 @@ app.get("/leaderboard", async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to fetch leaderboard",
+      error: err.message
+    });
+  }
+});
+
+app.get("/user-details/:username", async (req, res) => {
+  try {
+    const username = req.params.username;
+
+    if (!username) {
+      return res.status(400).json({
+        success: false,
+        message: "Username is required"
+      });
+    }
+
+    if (isExcludedUser(username)) {
+      return res.status(200).json({
+        success: true,
+        username,
+        count: 0,
+        totalPoints: 0,
+        details: []
+      });
+    }
+
+    const details = await Activity.find({
+      $and: [
+        { author: username },
+        { author: { $nin: EXCLUDED_USERS } }
+      ]
+    })
+      .select("repo source type difficulty message points timestamp url")
+      .sort({ timestamp: -1 })
+      .lean();
+
+    const totalPoints = details.reduce((sum, item) => sum + (item.points || 0), 0);
+
+    res.status(200).json({
+      success: true,
+      username,
+      count: details.length,
+      totalPoints,
+      details
+    });
+  } catch (err) {
+    console.error("❌ User details error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch user details",
       error: err.message
     });
   }
@@ -226,7 +284,7 @@ app.get("/repo-issues", async (req, res) => {
     const repoNames = repoDocs.map((repo) => repo.name).filter(Boolean);
 
     const repos = await Promise.all(
-      repoNames.map((repoName) => fetchRepoOpenIssues(repoName))
+      repoNames.map((repoName) => fetchRepoOpenIssuesSummary(repoName))
     );
 
     res.status(200).json({
@@ -239,6 +297,35 @@ app.get("/repo-issues", async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to fetch repo issues",
+      error: err.message
+    });
+  }
+});
+
+app.get("/repo-issues/:repoName", async (req, res) => {
+  try {
+    const repoName = req.params.repoName;
+
+    if (!repoName) {
+      return res.status(400).json({
+        success: false,
+        message: "Repository name is required"
+      });
+    }
+
+    const issues = await fetchRepoIssueDetails(repoName);
+
+    res.status(200).json({
+      success: true,
+      repo: repoName,
+      count: issues.length,
+      issues
+    });
+  } catch (err) {
+    console.error("❌ Repo issue details error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch repo issue details",
       error: err.message
     });
   }

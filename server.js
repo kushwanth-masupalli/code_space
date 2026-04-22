@@ -11,6 +11,8 @@ const PORT = process.env.PORT || 10000;
 app.use(cors());
 app.use(express.json());
 
+const EXCLUDED_USERS = ["kushwanth-masupalli"];
+
 async function connectDB() {
   try {
     if (!process.env.MONGO_URI) {
@@ -82,6 +84,54 @@ function calculatePRPoints(type, difficulty) {
   return rule[difficulty] || rule.default || 0;
 }
 
+function isExcludedUser(username) {
+  if (!username) return false;
+  return EXCLUDED_USERS.includes(username.toLowerCase());
+}
+
+async function githubRequest(url) {
+  const token = process.env.GITHUB_TOKEN;
+
+  if (!token) {
+    throw new Error("GITHUB_TOKEN is not defined");
+  }
+
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github+json",
+      "User-Agent": "DevPulse-App"
+    }
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`GitHub API error: ${response.status} ${errorText}`);
+  }
+
+  return response.json();
+}
+
+async function fetchRepoOpenIssues(repoName) {
+  const org = process.env.GITHUB_ORG;
+
+  if (!org) {
+    throw new Error("GITHUB_ORG is not defined");
+  }
+
+  const issues = await githubRequest(
+    `https://api.github.com/repos/${org}/${repoName}/issues?state=open&per_page=100`
+  );
+
+  const pureIssues = issues.filter((item) => !item.pull_request);
+
+  return {
+    name: repoName,
+    openIssues: pureIssues.length,
+    htmlUrl: `https://github.com/${org}/${repoName}/issues`
+  };
+}
+
 app.get("/", (req, res) => {
   res.send("GitHub webhook server running");
 });
@@ -89,6 +139,11 @@ app.get("/", (req, res) => {
 app.get("/leaderboard", async (req, res) => {
   try {
     const data = await Activity.aggregate([
+      {
+        $match: {
+          author: { $nin: EXCLUDED_USERS }
+        }
+      },
       {
         $group: {
           _id: "$author",
@@ -142,6 +197,53 @@ app.get("/leaderboard", async (req, res) => {
   }
 });
 
+app.get("/repo-issues", async (req, res) => {
+  try {
+    const repoDocs = await Activity.aggregate([
+      {
+        $match: {
+          author: { $nin: EXCLUDED_USERS }
+        }
+      },
+      {
+        $group: {
+          _id: "$repo"
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          name: "$_id"
+        }
+      },
+      {
+        $sort: {
+          name: 1
+        }
+      }
+    ]);
+
+    const repoNames = repoDocs.map((repo) => repo.name).filter(Boolean);
+
+    const repos = await Promise.all(
+      repoNames.map((repoName) => fetchRepoOpenIssues(repoName))
+    );
+
+    res.status(200).json({
+      success: true,
+      count: repos.length,
+      repos
+    });
+  } catch (err) {
+    console.error("❌ Repo issues error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch repo issues",
+      error: err.message
+    });
+  }
+});
+
 app.post("/webhook/github", async (req, res) => {
   try {
     const eventType = req.headers["x-github-event"];
@@ -159,35 +261,46 @@ app.post("/webhook/github", async (req, res) => {
         });
       }
 
-      const docs = commits.map((commit) => {
-        const type = extractType(commit.message);
-        const points = calculateCommitPoints(type);
-
-        return {
-          deliveryId,
-          eventType: "push",
-          source: "commit", 
-
-          repo,
-          author:
+      const docs = commits
+        .map((commit) => {
+          const author =
             commit.author?.username ||
             commit.author?.name ||
             payload.sender?.login ||
-            "unknown",
+            "unknown";
 
-          message: commit.message || "No message",
-          url: commit.url || null,
-          timestamp: commit.timestamp ? new Date(commit.timestamp) : new Date(),
+          if (isExcludedUser(author)) {
+            return null;
+          }
 
-          commitId: commit.id || null,
-          prNumber: null,
-          action: null,
+          const type = extractType(commit.message);
+          const points = calculateCommitPoints(type);
 
-          type,
-          difficulty: null,
-          points
-        };
-      });
+          return {
+            deliveryId,
+            eventType: "push",
+            source: "commit",
+            repo,
+            author,
+            message: commit.message || "No message",
+            url: commit.url || null,
+            timestamp: commit.timestamp ? new Date(commit.timestamp) : new Date(),
+            commitId: commit.id || null,
+            prNumber: null,
+            action: null,
+            type,
+            difficulty: null,
+            points
+          };
+        })
+        .filter(Boolean);
+
+      if (docs.length === 0) {
+        return res.status(200).json({
+          success: true,
+          message: "All commits ignored because author is excluded"
+        });
+      }
 
       await Activity.insertMany(docs);
 
@@ -208,7 +321,15 @@ app.post("/webhook/github", async (req, res) => {
         });
       }
 
-      // Only award points when PR is actually merged
+      const author = pr.user?.login || payload.sender?.login || "unknown";
+
+      if (isExcludedUser(author)) {
+        return res.status(200).json({
+          success: true,
+          message: "PR ignored because author is excluded"
+        });
+      }
+
       if (payload.action === "closed" && pr.merged === true) {
         let type = extractType(pr.title);
         type = normalizePRType(type);
@@ -220,18 +341,14 @@ app.post("/webhook/github", async (req, res) => {
           deliveryId,
           eventType: "pull_request",
           source: "pr",
-
           repo: payload.repository?.name || "unknown",
-          author: pr.user?.login || payload.sender?.login || "unknown",
-
+          author,
           message: pr.title || "No title",
           url: pr.html_url || null,
           timestamp: pr.merged_at ? new Date(pr.merged_at) : new Date(),
-
           commitId: null,
           prNumber: pr.number || null,
           action: "merged",
-
           type,
           difficulty,
           points

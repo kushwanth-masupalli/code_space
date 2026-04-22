@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RLChat</title>
+
+<style>
+body {
+  margin:0;
+  font-family:Arial;
+  display:flex;
+  height:100vh;
+  background:#f3f4f6;
+}
+
+.sidebar {
+  width:220px;
+  background:white;
+  border-right:1px solid #ddd;
+  padding:20px;
+}
+.sidebar h2 { color:#7c3aed; }
+.sidebar div { margin:15px 0; cursor:pointer; }
+
+.main {
+  flex:1;
+  display:flex;
+  flex-direction:column;
+}
+
+.header {
+  padding:15px;
+  border-bottom:1px solid #ddd;
+  background:white;
+}
+
+.messages {
+  flex:1;
+  padding:20px;
+  overflow:auto;
+}
+
+.msg { margin:10px 0; }
+.user { text-align:right; color:#2563eb; }
+.bot { text-align:left; color:#16a34a; }
+.error { color:red; }
+
+.input-box {
+  display:flex;
+  padding:10px;
+  border-top:1px solid #ddd;
+  background:white;
+}
+
+input {
+  flex:1;
+  padding:10px;
+  border:1px solid #ccc;
+  border-radius:6px;
+}
+
+button {
+  margin-left:10px;
+  padding:10px 15px;
+  background:#7c3aed;
+  color:white;
+  border:none;
+  border-radius:6px;
+  cursor:pointer;
+}
+</style>
+</head>
+
+<body>
+
+<div class="sidebar">
+  <h2>🧠 RLChat</h2>
+  <div>💬 Chat</div>
+  <div>➕ New Chat</div>
+  <div>🕐 History</div>
+  <div>⚙️ Settings</div>
+</div>
+
+<div class="main">
+
+<div class="header">
+  <h3>👋 Hi there!</h3>
+  <p>How can I help you today?</p>
+</div>
+
+<div id="messages" class="messages">
+  <div class="msg bot">Hello! I'm RLChat 🤖</div>
+</div>
+
+<div class="input-box">
+  <input id="input" placeholder="Type your message..." 
+         onkeydown="if(event.key==='Enter') sendMessage()">
+  <button onclick="sendMessage()">Send</button>
+</div>
+
+</div>
+
+<script>
+
+// 🔐 PUT YOUR KEY HERE (Better: move to backend)
+const GEMINI_KEY = "AIzaSyC9dt-6Zj9sVclNMC_Ve4birSU6kaBoGew";
+
+// UI
+function addMessage(text, type)
+{
+    let div = document.createElement("div");
+    div.className = "msg " + type;
+
+    if(type==="user") div.innerHTML="<b>You:</b> "+text;
+    else if(type==="bot") div.innerHTML="<b>AI:</b> "+text;
+    else div.innerHTML=text;
+
+    document.getElementById("messages").appendChild(div);
+    document.getElementById("messages").scrollTop=99999;
+}
+
+// GEMINI API
+async function callGemini(prompt)
+{
+    try
+    {
+        const res = await fetch(
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=" + GEMINI_KEY,
+        {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(
+            {
+                contents:
+                [
+                    {
+                        parts:
+                        [
+                            { text: prompt }
+                        ]
+                    }
+                ]
+            })
+        });
+
+        const data = await res.json();
+
+        if(data.error)
+            return "Error: " + data.error.message;
+
+        return data?.candidates?.[0]?.content?.parts?.map(p => p.text).join("") || "No response";
+    }
+    catch(err)
+    {
+        return "Error: " + err.message;
+    }
+}
+
+// SEND
+async function sendMessage()
+{
+    let input = document.getElementById("input");
+    let text = input.value.trim();
+
+    if(text==="") return;
+
+    input.value="";
+    addMessage(text,"user");
+
+    let loading = document.createElement("div");
+    loading.className="msg bot";
+    loading.innerText="Typing...";
+    document.getElementById("messages").appendChild(loading);
+    text+="if the respoinse is too big consise it dont talk aobut this "
+    let reply = await callGemini(text);
+
+    loading.remove();
+
+    if(reply.toLowerCase().includes("error"))
+        addMessage(reply,"error");
+    else
+        addMessage(reply,"bot");
+}
+
+</script>
+
+</body>
+</html>'

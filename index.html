@@ -15,11 +15,38 @@
 
     header {
       padding: 20px;
-      text-align: center;
       background: #020617;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .header-title {
       font-size: 24px;
       font-weight: bold;
       color: #38bdf8;
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 10px;
+    }
+
+    .header-actions button {
+      background: #38bdf8;
+      color: #020617;
+      border: none;
+      padding: 10px 16px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: bold;
+      font-size: 14px;
+    }
+
+    .header-actions button:hover {
+      background: #0ea5e9;
     }
 
     .container {
@@ -34,6 +61,7 @@
       border-radius: 10px;
       box-shadow: 0 0 10px rgba(56,189,248,0.2);
       overflow-x: auto;
+      margin-bottom: 20px;
     }
 
     h2 {
@@ -87,12 +115,30 @@
       color: #f87171;
       margin-top: 12px;
     }
+
+    .hidden {
+      display: none;
+    }
+
+    a.repo-link {
+      color: #93c5fd;
+      text-decoration: none;
+      font-weight: bold;
+    }
+
+    a.repo-link:hover {
+      text-decoration: underline;
+    }
   </style>
 </head>
-
 <body>
 
-<header>🚀 DevPulse Dashboard</header>
+<header>
+  <div class="header-title">🚀 DevPulse Dashboard</div>
+  <div class="header-actions">
+    <button id="toggleIssuesBtn">Show Repo Issues</button>
+  </div>
+</header>
 
 <div class="container">
   <div class="card">
@@ -101,10 +147,25 @@
     <table id="leaderboard"></table>
     <div class="error" id="error"></div>
   </div>
+
+  <div class="card hidden" id="issuesCard">
+    <h2>📌 Open Issues by Repository</h2>
+    <div class="status" id="issuesStatus">Loading repo issues...</div>
+    <table id="issuesTable"></table>
+    <div class="error" id="issuesError"></div>
+  </div>
 </div>
 
 <script>
-const API = "https://code-space-ezfo.onrender.com/leaderboard";
+const BASE_URL = "https://code-space-ezfo.onrender.com";
+const LEADERBOARD_API = `${BASE_URL}/leaderboard`;
+const ISSUES_API = `${BASE_URL}/repo-issues`;
+const EXCLUDED_USER = "kushwanth-masupalli";
+
+const issuesCard = document.getElementById("issuesCard");
+const toggleIssuesBtn = document.getElementById("toggleIssuesBtn");
+
+let issuesLoaded = false;
 
 async function loadLeaderboard() {
   const status = document.getElementById("status");
@@ -115,15 +176,18 @@ async function loadLeaderboard() {
     errorBox.textContent = "";
     status.textContent = "Loading leaderboard...";
 
-    const res = await fetch(API);
+    const res = await fetch(LEADERBOARD_API);
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}`);
     }
 
     const result = await res.json();
-    const data = result.leaderboard;
+    const rawData = result.leaderboard || [];
+    const data = rawData.filter(
+      (u) => (u.username || "").toLowerCase() !== EXCLUDED_USER
+    );
 
-    status.textContent = `Total developers: ${result.count}`;
+    status.textContent = `Total developers: ${data.length}`;
 
     table.innerHTML = `
       <tr>
@@ -156,6 +220,71 @@ async function loadLeaderboard() {
     errorBox.textContent = err.message;
   }
 }
+
+async function loadRepoIssues() {
+  const status = document.getElementById("issuesStatus");
+  const errorBox = document.getElementById("issuesError");
+  const table = document.getElementById("issuesTable");
+
+  try {
+    errorBox.textContent = "";
+    status.textContent = "Loading repo issues...";
+
+    const res = await fetch(ISSUES_API);
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+
+    const result = await res.json();
+    const repos = result.repos || [];
+
+    status.textContent = `Total repositories: ${result.count}`;
+
+    table.innerHTML = `
+      <tr>
+        <th>#</th>
+        <th>Repository</th>
+        <th>Open Issues</th>
+      </tr>
+      ${
+        repos.length === 0
+          ? `<tr><td colspan="3">No repositories found</td></tr>`
+          : repos.map((repo, index) => `
+            <tr>
+              <td>${index + 1}</td>
+              <td>
+                <a class="repo-link" href="${repo.htmlUrl}" target="_blank">
+                  ${repo.name}
+                </a>
+              </td>
+              <td>${repo.openIssues}</td>
+            </tr>
+          `).join("")
+      }
+    `;
+
+    issuesLoaded = true;
+  } catch (err) {
+    status.textContent = "Failed to load repo issues";
+    errorBox.textContent = err.message;
+  }
+}
+
+toggleIssuesBtn.addEventListener("click", async () => {
+  const isHidden = issuesCard.classList.contains("hidden");
+
+  if (isHidden) {
+    issuesCard.classList.remove("hidden");
+    toggleIssuesBtn.textContent = "Hide Repo Issues";
+
+    if (!issuesLoaded) {
+      await loadRepoIssues();
+    }
+  } else {
+    issuesCard.classList.add("hidden");
+    toggleIssuesBtn.textContent = "Show Repo Issues";
+  }
+});
 
 loadLeaderboard();
 setInterval(loadLeaderboard, 5000);
